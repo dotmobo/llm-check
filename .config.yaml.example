@@ -1,0 +1,27 @@
+llm:
+  base_url: https://your-openai-api.fr/v1
+  token: s3cr3t
+
+models:
+  - name: gpt-oss-120b
+    capabilities:
+      - tool_calling
+      - reasoning
+  - name: mistral-small-3.2-24b
+    capabilities:
+      - tool_calling
+      - multimodal
+  - name: qwen-3.6-35b-instruct
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    chat_template_kwargs:
+      enable_thinking: true
+  - name: gemma-4-31b
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    chat_template_kwargs:
+      enable_thinking: true
