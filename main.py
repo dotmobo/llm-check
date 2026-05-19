@@ -291,7 +291,8 @@ def run_reasoning_test(
             "No message in response — model likely does not support reasoning"
         )
     extra = choice.message.model_extra or {}
-    reasoning = extra.get("reasoning_content") or ""
+    # Fallback to "reasoning" for older models that don't use "reasoning_content" key
+    reasoning = extra.get("reasoning_content") or extra.get("reasoning") or ""
     if not reasoning:
         raise ValueError("No reasoning content returned")
     return {"response": choice.message.content or "", "reasoning_content": reasoning}
