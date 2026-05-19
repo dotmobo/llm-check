@@ -12,6 +12,7 @@ from main import (
     run_test,
     run_basic_completion_test,
     run_tool_calling_test,
+    run_tool_calling_strict_test,
     run_multimodal_test,
     run_reasoning_test,
     run_model_tests,
@@ -83,6 +84,77 @@ class TestBasicCompletion:
             MockOpenAI.return_value.chat.completions.create.return_value = mock_response
             with pytest.raises(ValueError, match="No message in response"):
                 run_basic_completion_test("gpt-oss-120b")
+
+
+# --- run_tool_calling_strict_test ---
+
+
+class TestToolCallingStrict:
+    def test_model_calls_tool_strict(self):
+        """Model returns a tool call with strict mode."""
+        from openai.types.chat.chat_completion_message_tool_call import (
+            ChatCompletionMessageToolCall,
+        )
+
+        mock_func = MagicMock()
+        mock_func.name = "get_current_temperature"
+        mock_func.arguments = '{"location":"Paris, France"}'
+        mock_tool_call = MagicMock(spec=ChatCompletionMessageToolCall)
+        mock_tool_call.type = "function"
+        mock_tool_call.function = mock_func
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=None,
+                    tool_calls=[mock_tool_call],
+                )
+            )
+        ]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = mock_response
+            result = run_tool_calling_strict_test("gpt-oss-120b")
+
+        assert result["tool_calls"] is True
+        assert result["tool_names"] == ["get_current_temperature"]
+
+    def test_model_does_not_call_tool_strict(self):
+        """Model returns no tool calls in strict mode — raises error."""
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content="I'm not sure about the temperature.",
+                    tool_calls=None,
+                )
+            )
+        ]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = mock_response
+            with pytest.raises(ValueError, match="did not call any tools"):
+                run_tool_calling_strict_test("gpt-oss-120b")
+
+    def test_raises_error_on_no_choices_strict(self):
+        """Raises ValueError when no choices returned in strict mode."""
+        mock_response = MagicMock()
+        mock_response.choices = None
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = mock_response
+            with pytest.raises(ValueError, match="No choices returned"):
+                run_tool_calling_strict_test("gpt-oss-120b")
+
+    def test_raises_error_on_none_message_strict(self):
+        """Raises ValueError when message is None in strict mode."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=None)]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = mock_response
+            with pytest.raises(ValueError, match="No message in response"):
+                run_tool_calling_strict_test("gpt-oss-120b")
 
 
 # --- run_tool_calling_test ---
@@ -244,16 +316,23 @@ class TestRunModelTests:
             with patch(
                 "main.run_tool_calling_test", return_value={"tool_calls": True}
             ) as mock_tool:
-                with patch.dict(
-                    "main.MODEL_CONFIG", {"test-model": {"tool_calling": False}}
-                ):
-                    result = run_model_tests("test-model")
+                with patch(
+                    "main.run_tool_calling_strict_test",
+                    return_value={"tool_calls": True},
+                ) as mock_tool_strict:
+                    with patch.dict(
+                        "main.MODEL_CONFIG", {"test-model": {"tool_calling": False}}
+                    ):
+                        result = run_model_tests("test-model")
 
         assert "basic_completion" in result
         assert "tool_calling" in result
+        assert "tool_calling_strict" in result
         assert result["tool_calling"]["skipped"] is True
+        assert result["tool_calling_strict"]["skipped"] is True
         assert mock_basic.call_count == 1
         assert mock_tool.call_count == 0
+        assert mock_tool_strict.call_count == 0
 
     def test_all_features_run_when_supported(self):
         """All tests run when all features are supported."""
@@ -264,33 +343,41 @@ class TestRunModelTests:
                 "main.run_tool_calling_test", return_value={"tool_calls": True}
             ) as mock_tool:
                 with patch(
-                    "main.run_reasoning_test",
-                    return_value={"reasoning_content": "3-2=1"},
-                ) as mock_reasoning:
+                    "main.run_tool_calling_strict_test",
+                    return_value={"tool_calls": True},
+                ) as mock_tool_strict:
                     with patch(
-                        "main.run_multimodal_test", return_value={"response": "logo"}
-                    ) as mock_multimodal:
-                        with patch.dict(
-                            "main.MODEL_CONFIG",
-                            {
-                                "test-model": {
-                                    "tool_calling": True,
-                                    "reasoning": True,
-                                    "multimodal": True,
-                                }
-                            },
-                        ):
-                            result = run_model_tests("test-model")
+                        "main.run_reasoning_test",
+                        return_value={"reasoning_content": "3-2=1"},
+                    ) as mock_reasoning:
+                        with patch(
+                            "main.run_multimodal_test",
+                            return_value={"response": "logo"},
+                        ) as mock_multimodal:
+                            with patch.dict(
+                                "main.MODEL_CONFIG",
+                                {
+                                    "test-model": {
+                                        "tool_calling": True,
+                                        "reasoning": True,
+                                        "multimodal": True,
+                                    }
+                                },
+                            ):
+                                result = run_model_tests("test-model")
 
         assert "basic_completion" in result
         assert "tool_calling" in result
+        assert "tool_calling_strict" in result
         assert "reasoning" in result
         assert "multimodal" in result
         assert result["tool_calling"]["passed"] is True
+        assert result["tool_calling_strict"]["passed"] is True
         assert result["reasoning"]["passed"] is True
         assert result["multimodal"]["passed"] is True
         mock_basic.assert_called_once()
         mock_tool.assert_called_once()
+        mock_tool_strict.assert_called_once()
         mock_reasoning.assert_called_once()
         mock_multimodal.assert_called_once()
 
@@ -298,21 +385,23 @@ class TestRunModelTests:
         """Skipped features are not run and show skipped message."""
         with patch("main.run_basic_completion_test", return_value={"response": "ok"}):
             with patch("main.run_tool_calling_test"):
-                with patch("main.run_reasoning_test"):
-                    with patch("main.run_multimodal_test"):
-                        with patch.dict(
-                            "main.MODEL_CONFIG",
-                            {
-                                "test-model": {
-                                    "tool_calling": False,
-                                    "reasoning": False,
-                                    "multimodal": False,
-                                }
-                            },
-                        ):
-                            result = run_model_tests("test-model")
+                with patch("main.run_tool_calling_strict_test"):
+                    with patch("main.run_reasoning_test"):
+                        with patch("main.run_multimodal_test"):
+                            with patch.dict(
+                                "main.MODEL_CONFIG",
+                                {
+                                    "test-model": {
+                                        "tool_calling": False,
+                                        "reasoning": False,
+                                        "multimodal": False,
+                                    }
+                                },
+                            ):
+                                result = run_model_tests("test-model")
 
         assert result["tool_calling"]["skipped"] is True
+        assert result["tool_calling_strict"]["skipped"] is True
         assert result["reasoning"]["skipped"] is True
         assert result["multimodal"]["skipped"] is True
 
@@ -641,6 +730,12 @@ class TestPydanticModels:
                             "tool_calls": True,
                             "tool_names": ["get_temperature"],
                         },
+                        "tool_calling_strict": {
+                            "passed": True,
+                            "latency_ms": 210.0,
+                            "tool_calls": True,
+                            "tool_names": ["get_temperature"],
+                        },
                         "reasoning": {
                             "passed": False,
                             "skipped": True,
@@ -660,6 +755,7 @@ class TestPydanticModels:
         assert "test-model" in data["models"]
         assert data["models"]["test-model"]["basic_completion"]["response"] == "hello"
         assert data["models"]["test-model"]["reasoning"]["skipped"] is True
+        assert data["models"]["test-model"]["tool_calling_strict"]["tool_calls"] is True
 
     def test_llm_report_validates(self):
         """LLMReport validates its structure."""
@@ -676,21 +772,28 @@ class TestPydanticModels:
                     "tool_calls": True,
                     "tool_names": ["tool1"],
                 },
-                "reasoning": {
+                "tool_calling_strict": {
                     "passed": True,
                     "latency_ms": 70.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "reasoning": {
+                    "passed": True,
+                    "latency_ms": 80.0,
                     "response": "1",
                     "reasoning_content": "1+1=2",
                 },
                 "multimodal": {
                     "passed": True,
-                    "latency_ms": 80.0,
+                    "latency_ms": 90.0,
                     "response": "Image content",
                 },
             }
         )
         assert report.basic_completion.passed is True
         assert report.tool_calling.tool_calls is True  # ty: ignore[unresolved-attribute]
+        assert report.tool_calling_strict.tool_calls is True  # ty: ignore[unresolved-attribute]
         assert report.reasoning.reasoning_content == "1+1=2"  # ty: ignore[unresolved-attribute]
 
     def test_skipped_result_defaults(self):
@@ -703,12 +806,18 @@ class TestPydanticModels:
                     "response": "test",
                 },
                 "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "tool_calling_strict": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
                 "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
             }
         )
         assert report.tool_calling.skipped is True
         assert report.tool_calling.passed is False
+        assert report.tool_calling_strict.skipped is True
         assert report.reasoning.skipped is True
         assert report.multimodal.skipped is True
 
@@ -738,6 +847,11 @@ class TestSaveJsonReport:
                                 "response": "ok",
                             },
                             "tool_calling": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0.0,
+                            },
+                            "tool_calling_strict": {
                                 "passed": False,
                                 "skipped": True,
                                 "latency_ms": 0.0,

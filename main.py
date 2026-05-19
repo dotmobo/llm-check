@@ -47,6 +47,7 @@ class MultimodalResult(TestResult):
 class LLMReport(BaseModel):
     basic_completion: BasicCompletionResult
     tool_calling: ToolCallingResult | TestResult
+    tool_calling_strict: ToolCallingResult | TestResult
     reasoning: ReasoningResult | TestResult
     multimodal: MultimodalResult | TestResult
 
@@ -134,6 +135,26 @@ TEST_TOOL: ChatCompletionToolParam = {
     },
 }
 
+TEST_TOOL_STRICT: ChatCompletionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "get_current_temperature",
+        "description": "Get the current temperature in a given location",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city and country, e.g. Paris, France",
+                },
+            },
+            "required": ["location"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+}
+
 PROMPT_WITH_TOOL = (
     "What is the current temperature in Paris, France? "
     "Use the available tools to answer."
@@ -194,6 +215,38 @@ def run_tool_calling_test(model: str) -> dict[str, Any]:
         model=model,
         messages=[{"role": "user", "content": PROMPT_WITH_TOOL}],
         tools=[TEST_TOOL],
+        max_tokens=2048,
+    )
+    if not response.choices:
+        raise ValueError(
+            "No choices returned — model likely does not support tool calling"
+        )
+    choice = response.choices[0]
+    if choice.message is None:
+        raise ValueError(
+            "No message in response — model likely does not support tool calling"
+        )
+    from openai.types.chat.chat_completion_message_tool_call import (
+        ChatCompletionMessageToolCall,
+    )
+
+    tool_calls = choice.message.tool_calls or []
+    if not tool_calls:
+        raise ValueError("Model did not call any tools")
+    tool_names = [
+        tc.function.name
+        for tc in tool_calls
+        if isinstance(tc, ChatCompletionMessageToolCall)
+    ]
+    return {"tool_calls": True, "tool_names": tool_names}
+
+
+def run_tool_calling_strict_test(model: str) -> dict[str, Any]:
+    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": PROMPT_WITH_TOOL}],
+        tools=[TEST_TOOL_STRICT],
         max_tokens=2048,
     )
     if not response.choices:
@@ -314,6 +367,11 @@ def run_model_tests(model: str) -> dict[str, Any]:
 
     results["tool_calling"] = (
         run_test(model, "tool_calling", run_tool_calling_test)
+        if config.get("tool_calling")
+        else _SKIPPED.copy()
+    )
+    results["tool_calling_strict"] = (
+        run_test(model, "tool_calling_strict", run_tool_calling_strict_test)
         if config.get("tool_calling")
         else _SKIPPED.copy()
     )
