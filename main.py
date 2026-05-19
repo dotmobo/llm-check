@@ -131,7 +131,6 @@ TEST_TOOL: ChatCompletionToolParam = {
             "required": ["location"],
             "additionalProperties": False,
         },
-        "strict": True,
     },
 }
 
