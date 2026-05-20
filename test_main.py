@@ -689,8 +689,8 @@ class TestReasoning:
             with pytest.raises(ValueError, match="No message in response"):
                 run_reasoning_test("gpt-oss-120b")
 
-    def test_reasoning_passes_chat_template_kwargs(self):
-        """chat_template_kwargs is passed via extra_body."""
+    def test_reasoning_passes_extra_body(self):
+        """extra_body is passed via kwargs."""
         mock_message = MagicMock()
         mock_message.content = "1"
         mock_message.model_extra = {"reasoning_content": "3 - 2 = 1"}
@@ -700,7 +700,9 @@ class TestReasoning:
 
         with patch("main.OpenAI") as MockOpenAI:
             MockOpenAI.return_value.chat.completions.create.return_value = mock_response
-            run_reasoning_test("gemma", chat_template_kwargs={"enable_thinking": True})
+            run_reasoning_test(
+                "gemma", extra_body={"chat_template_kwargs": {"enable_thinking": True}}
+            )
 
         MockOpenAI.return_value.chat.completions.create.assert_called_once()
         call_kwargs = MockOpenAI.return_value.chat.completions.create.call_args[1]

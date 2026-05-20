@@ -16,12 +16,14 @@ models:
       - tool_calling
       - multimodal
       - reasoning
-    chat_template_kwargs:
-      enable_thinking: true
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
   - name: gemma-4-31b
     capabilities:
       - tool_calling
       - multimodal
       - reasoning
-    chat_template_kwargs:
-      enable_thinking: true
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true

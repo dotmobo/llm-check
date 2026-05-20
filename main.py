@@ -91,13 +91,14 @@ for _entry in MODEL_LIST:
             "tool_calling": "tool_calling" in _caps,
             "reasoning": "reasoning" in _caps,
             "multimodal": "multimodal" in _caps,
-            "chat_template_kwargs": _entry.get("chat_template_kwargs"),
+            "extra_body": _entry.get("extra_body"),
         }
     elif isinstance(_entry, str) and _entry.strip():
         MODEL_CONFIG[_entry] = {
             "tool_calling": True,
             "reasoning": False,
             "multimodal": False,
+            "extra_body": None,
         }
     else:
         print(f"[WARN] Ignoring invalid model entry: {_entry!r}", file=sys.stderr)
@@ -194,12 +195,17 @@ def run_test(model: str, test_name: str, func, **kwargs) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def run_basic_completion_test(model: str) -> dict[str, Any]:
+def run_basic_completion_test(
+    model: str, extra_body: dict | None = None
+) -> dict[str, Any]:
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": "Say 'hello' in exactly two words."}],
-        max_tokens=2048,
+        **kwargs,
     )
     if not response.choices:
         raise ValueError("No choices returned")
@@ -209,13 +215,16 @@ def run_basic_completion_test(model: str) -> dict[str, Any]:
     return {"response": choice.message.content or ""}
 
 
-def run_tool_calling_test(model: str) -> dict[str, Any]:
+def run_tool_calling_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": PROMPT_WITH_TOOL}],
         tools=[TEST_TOOL],
-        max_tokens=2048,
+        **kwargs,
     )
     if not response.choices:
         raise ValueError(
@@ -241,13 +250,18 @@ def run_tool_calling_test(model: str) -> dict[str, Any]:
     return {"tool_calls": True, "tool_names": tool_names}
 
 
-def run_tool_calling_strict_test(model: str) -> dict[str, Any]:
+def run_tool_calling_strict_test(
+    model: str, extra_body: dict | None = None
+) -> dict[str, Any]:
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": PROMPT_WITH_TOOL}],
         tools=[TEST_TOOL_STRICT],
-        max_tokens=2048,
+        **kwargs,
     )
     if not response.choices:
         raise ValueError(
@@ -273,12 +287,15 @@ def run_tool_calling_strict_test(model: str) -> dict[str, Any]:
     return {"tool_calls": True, "tool_names": tool_names}
 
 
-def run_multimodal_test(model: str) -> dict[str, Any]:
+def run_multimodal_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
     if not _IMAGE_BASE64:
         raise ValueError(
             "No test image found — place data/multimodal_test.png next to the script"
         )
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -299,7 +316,7 @@ def run_multimodal_test(model: str) -> dict[str, Any]:
                 ],
             }
         ],
-        max_tokens=2048,
+        **kwargs,
     )
     if not response.choices:
         raise ValueError(
@@ -313,13 +330,11 @@ def run_multimodal_test(model: str) -> dict[str, Any]:
     return {"response": choice.message.content or ""}
 
 
-def run_reasoning_test(
-    model: str, chat_template_kwargs: dict | None = None
-) -> dict[str, Any]:
+def run_reasoning_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
-    kwargs: dict[str, Any] = {"max_tokens": 2048, "reasoning_effort": "high"}
-    if chat_template_kwargs:
-        kwargs["extra_body"] = {"chat_template_kwargs": chat_template_kwargs}
+    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -342,7 +357,6 @@ def run_reasoning_test(
         raise ValueError(
             "No message in response — model likely does not support reasoning"
         )
-    print(f"Full response for reasoning test: {response.model_dump()}")
     extra = choice.message.model_extra or {}
     # Fallback to "reasoning" for older models that don't use "reasoning_content" key
     reasoning = extra.get("reasoning_content") or extra.get("reasoning") or ""
@@ -361,34 +375,52 @@ _SKIPPED: dict[str, Any] = {"passed": False, "skipped": True, "latency_ms": 0.0}
 def run_model_tests(model: str) -> dict[str, Any]:
     config = MODEL_CONFIG.get(model, {})
     results: dict[str, Any] = {}
+    _extra_body = config.get("extra_body") or {}
 
     results["basic_completion"] = run_test(
-        model, "basic_completion", run_basic_completion_test
+        model,
+        "basic_completion",
+        run_basic_completion_test,
+        extra_body=_extra_body,
     )
 
     results["tool_calling"] = (
-        run_test(model, "tool_calling", run_tool_calling_test)
+        run_test(
+            model,
+            "tool_calling",
+            run_tool_calling_test,
+            extra_body=_extra_body,
+        )
         if config.get("tool_calling")
         else _SKIPPED.copy()
     )
     results["tool_calling_strict"] = (
-        run_test(model, "tool_calling_strict", run_tool_calling_strict_test)
+        run_test(
+            model,
+            "tool_calling_strict",
+            run_tool_calling_strict_test,
+            extra_body=_extra_body,
+        )
         if config.get("tool_calling")
         else _SKIPPED.copy()
     )
-    _reasoning_kwargs = config.get("chat_template_kwargs")
     results["reasoning"] = (
         run_test(
             model,
             "reasoning",
             run_reasoning_test,
-            chat_template_kwargs=_reasoning_kwargs,
+            extra_body=_extra_body,
         )
         if config.get("reasoning")
         else _SKIPPED.copy()
     )
     results["multimodal"] = (
-        run_test(model, "multimodal", run_multimodal_test)
+        run_test(
+            model,
+            "multimodal",
+            run_multimodal_test,
+            extra_body=_extra_body,
+        )
         if config.get("multimodal")
         else _SKIPPED.copy()
     )
