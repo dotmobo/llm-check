@@ -317,7 +317,7 @@ def run_reasoning_test(
     model: str, chat_template_kwargs: dict | None = None
 ) -> dict[str, Any]:
     client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
-    kwargs: dict[str, Any] = {"max_tokens": 2048}
+    kwargs: dict[str, Any] = {"max_tokens": 2048, "reasoning_effort": "high"}
     if chat_template_kwargs:
         kwargs["extra_body"] = {"chat_template_kwargs": chat_template_kwargs}
     response = client.chat.completions.create(
@@ -342,6 +342,7 @@ def run_reasoning_test(
         raise ValueError(
             "No message in response — model likely does not support reasoning"
         )
+    print(f"Full response for reasoning test: {response.model_dump()}")
     extra = choice.message.model_extra or {}
     # Fallback to "reasoning" for older models that don't use "reasoning_content" key
     reasoning = extra.get("reasoning_content") or extra.get("reasoning") or ""
