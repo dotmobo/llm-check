@@ -15,6 +15,7 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 - Legacy format `model_capabilities` with string codes (`tc`, `r`, `m`) is still supported but deprecated.
 - **Never** use `.env` — that was removed. Use `config.yaml` only.
 - Models without a capability flag get a `{"passed": false, "skipped": true}` result (not `FAIL`).
+- `extra_body` can be added under a model entry for per-model API settings (e.g. `chat_template_kwargs`, `reasoning_effort`).
 
 ## Key implementation details
 

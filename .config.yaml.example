@@ -27,3 +27,10 @@ models:
     extra_body:
       chat_template_kwargs:
         enable_thinking: true
+  - name: mistral-small-4-119b
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    extra_body:
+      reasoning_effort: high

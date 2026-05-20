@@ -36,6 +36,29 @@ models:
     capabilities:
       - tool_calling
       - multimodal
+  - name: qwen-3.6-35b-instruct
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+  - name: gemma-4-31b
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: true
+  - name: mistral-small-4-119b
+    capabilities:
+      - tool_calling
+      - multimodal
+      - reasoning
+    extra_body:
+      reasoning_effort: high
 ```
 
 Supported capabilities:
@@ -43,17 +66,11 @@ Supported capabilities:
 - `reasoning` — the model produces reasoning content
 - `multimodal` — the model can understand images
 
-Some models require additional `chat_template_kwargs` for reasoning tests. Add it under the model entry:
+Some models require `extra_body` for reasoning tests:
+- `chat_template_kwargs` — e.g. `enable_thinking: true` (qwen, gemma)
+- `reasoning_effort` — e.g. `high` (mistral-small-4)
 
-```yaml
-  - name: gemma
-    capabilities:
-      - tool_calling
-      - reasoning
-      - multimodal
-    chat_template_kwargs:
-      enable_thinking: true
-```
+Add it under the model entry as shown above.
 
 ## Usage
 
