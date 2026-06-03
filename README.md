@@ -1,6 +1,6 @@
 # llm-check
 
-A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal) for monitoring.
+A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming) for monitoring.
 
 ## Features
 
@@ -8,6 +8,7 @@ A Python script to verify LLM inference server capabilities (basic completion, t
 - Tests tool calling
 - Tests reasoning content
 - Tests multimodal (image understanding)
+- Tests streaming mode
 - Skips tests based on model capabilities defined in config
 - Human-readable colored console report
 - JSON report output for monitoring tools
@@ -65,6 +66,7 @@ Supported capabilities:
 - `tool_calling` — the model can call tools/functions
 - `reasoning` — the model produces reasoning content
 - `multimodal` — the model can understand images
+- `streaming` — the model supports streaming responses
 
 Some models require `extra_body` for reasoning tests:
 - `chat_template_kwargs` — e.g. `enable_thinking: true` (qwen, gemma)

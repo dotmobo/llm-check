@@ -15,6 +15,7 @@ from main import (
     run_tool_calling_strict_test,
     run_multimodal_test,
     run_reasoning_test,
+    run_streaming_test,
     run_model_tests,
     print_report,
     save_json_report,
@@ -354,32 +355,40 @@ class TestRunModelTests:
                             "main.run_multimodal_test",
                             return_value={"response": "logo"},
                         ) as mock_multimodal:
-                            with patch.dict(
-                                "main.MODEL_CONFIG",
-                                {
-                                    "test-model": {
-                                        "tool_calling": True,
-                                        "reasoning": True,
-                                        "multimodal": True,
-                                    }
-                                },
-                            ):
-                                result = run_model_tests("test-model")
+                            with patch(
+                                "main.run_streaming_test",
+                                return_value={"response": "streamed"},
+                            ) as mock_streaming:
+                                with patch.dict(
+                                    "main.MODEL_CONFIG",
+                                    {
+                                        "test-model": {
+                                            "tool_calling": True,
+                                            "reasoning": True,
+                                            "multimodal": True,
+                                            "streaming": True,
+                                        }
+                                    },
+                                ):
+                                    result = run_model_tests("test-model")
 
         assert "basic_completion" in result
         assert "tool_calling" in result
         assert "tool_calling_strict" in result
         assert "reasoning" in result
         assert "multimodal" in result
+        assert "streaming" in result
         assert result["tool_calling"]["passed"] is True
         assert result["tool_calling_strict"]["passed"] is True
         assert result["reasoning"]["passed"] is True
         assert result["multimodal"]["passed"] is True
+        assert result["streaming"]["passed"] is True
         mock_basic.assert_called_once()
         mock_tool.assert_called_once()
         mock_tool_strict.assert_called_once()
         mock_reasoning.assert_called_once()
         mock_multimodal.assert_called_once()
+        mock_streaming.assert_called_once()
 
     def test_skipped_features_not_run(self):
         """Skipped features are not run and show skipped message."""
@@ -388,22 +397,25 @@ class TestRunModelTests:
                 with patch("main.run_tool_calling_strict_test"):
                     with patch("main.run_reasoning_test"):
                         with patch("main.run_multimodal_test"):
-                            with patch.dict(
-                                "main.MODEL_CONFIG",
-                                {
-                                    "test-model": {
-                                        "tool_calling": False,
-                                        "reasoning": False,
-                                        "multimodal": False,
-                                    }
-                                },
-                            ):
-                                result = run_model_tests("test-model")
+                            with patch("main.run_streaming_test"):
+                                with patch.dict(
+                                    "main.MODEL_CONFIG",
+                                    {
+                                        "test-model": {
+                                            "tool_calling": False,
+                                            "reasoning": False,
+                                            "multimodal": False,
+                                            "streaming": False,
+                                        }
+                                    },
+                                ):
+                                    result = run_model_tests("test-model")
 
         assert result["tool_calling"]["skipped"] is True
         assert result["tool_calling_strict"]["skipped"] is True
         assert result["reasoning"]["skipped"] is True
         assert result["multimodal"]["skipped"] is True
+        assert result["streaming"]["skipped"] is True
 
 
 # --- print_report ---
@@ -577,6 +589,7 @@ class TestConfig:
             assert "tool_calling" in caps
             assert "reasoning" in caps
             assert "multimodal" in caps
+            assert "streaming" in caps
 
     def test_test_tool_structure(self):
         """TEST_TOOL has the expected structure."""
@@ -748,6 +761,11 @@ class TestPydanticModels:
                             "latency_ms": 300.0,
                             "response": "A cat",
                         },
+                        "streaming": {
+                            "passed": True,
+                            "latency_ms": 150.0,
+                            "response": "streamed response",
+                        },
                     }
                 )
             }
@@ -791,12 +809,18 @@ class TestPydanticModels:
                     "latency_ms": 90.0,
                     "response": "Image content",
                 },
+                "streaming": {
+                    "passed": True,
+                    "latency_ms": 100.0,
+                    "response": "streamed",
+                },
             }
         )
         assert report.basic_completion.passed is True
         assert report.tool_calling.tool_calls is True  # ty: ignore[unresolved-attribute]
         assert report.tool_calling_strict.tool_calls is True  # ty: ignore[unresolved-attribute]
         assert report.reasoning.reasoning_content == "1+1=2"  # ty: ignore[unresolved-attribute]
+        assert report.streaming.response == "streamed"
 
     def test_skipped_result_defaults(self):
         """Skipped results have correct defaults."""
@@ -815,6 +839,7 @@ class TestPydanticModels:
                 },
                 "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
             }
         )
         assert report.tool_calling.skipped is True
@@ -822,6 +847,7 @@ class TestPydanticModels:
         assert report.tool_calling_strict.skipped is True
         assert report.reasoning.skipped is True
         assert report.multimodal.skipped is True
+        assert report.streaming.skipped is True
 
     def test_report_output_invalid_data(self):
         """ReportOutput rejects invalid data."""
@@ -868,6 +894,11 @@ class TestSaveJsonReport:
                                 "skipped": True,
                                 "latency_ms": 0.0,
                             },
+                            "streaming": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0.0,
+                            },
                         }
                     }
                 }
@@ -877,3 +908,87 @@ class TestSaveJsonReport:
         with open(report_file) as f:
             data = json.load(f)
         assert "models" in data
+
+
+# --- run_streaming_test ---
+
+
+class TestStreaming:
+    def _make_chunk(self, content: str | None, idx: int = 0, finish: str = ""):
+        delta = MagicMock()
+        delta.content = content
+        choice = MagicMock()
+        choice.index = idx
+        choice.delta = delta
+        choice.finish_reason = finish if finish else None
+        chunk = MagicMock()
+        chunk.choices = [choice]
+        return chunk
+
+    def test_streaming_returns_collected_content(self):
+        """Streaming test collects all chunks into a single response."""
+        stream = [
+            self._make_chunk("Hello"),
+            self._make_chunk(", "),
+            self._make_chunk("world!"),
+        ]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = stream
+            result = run_streaming_test("gpt-oss-120b")
+
+        assert result["response"] == "Hello, world!"
+
+    def test_streaming_handles_chunks_with_no_content(self):
+        """Chunks without content are skipped."""
+        stream = [
+            self._make_chunk(None),
+            self._make_chunk("Hello"),
+            self._make_chunk(None),
+            self._make_chunk(" world"),
+        ]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = stream
+            result = run_streaming_test("gpt-oss-120b")
+
+        assert result["response"] == "Hello world"
+
+    def test_streaming_raises_on_empty_response(self):
+        """Raises ValueError when stream returns no content."""
+        stream = [
+            self._make_chunk(None),
+            self._make_chunk(None, finish="stop"),
+        ]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = stream
+            with pytest.raises(ValueError, match="no content"):
+                run_streaming_test("gpt-oss-120b")
+
+    def test_streaming_handles_empty_choices(self):
+        """Chunks with empty choices list are skipped."""
+        empty_chunk = MagicMock()
+        empty_chunk.choices = []
+        stream = [empty_chunk, self._make_chunk("hello")]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = stream
+            result = run_streaming_test("gpt-oss-120b")
+
+        assert result["response"] == "hello"
+
+    def test_streaming_passes_extra_body(self):
+        """extra_body is passed via kwargs."""
+        stream = [self._make_chunk("ok", finish="stop")]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = stream
+            run_streaming_test(
+                "gemma", extra_body={"stream_options": {"include_usage": True}}
+            )
+
+        MockOpenAI.return_value.chat.completions.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.chat.completions.create.call_args[1]
+        assert call_kwargs["stream"] is True
+        assert call_kwargs["extra_body"]["stream_options"] == {"include_usage": True}

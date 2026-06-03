@@ -7,15 +7,18 @@ models:
     capabilities:
       - tool_calling
       - reasoning
+      - streaming
   - name: mistral-small-3.2-24b
     capabilities:
       - tool_calling
       - multimodal
+      - streaming
   - name: qwen-3.6-35b-instruct
     capabilities:
       - tool_calling
       - multimodal
       - reasoning
+      - streaming
     extra_body:
       chat_template_kwargs:
         enable_thinking: true
@@ -24,6 +27,7 @@ models:
       - tool_calling
       - multimodal
       - reasoning
+      - streaming
     extra_body:
       chat_template_kwargs:
         enable_thinking: true
@@ -32,5 +36,6 @@ models:
       - tool_calling
       - multimodal
       - reasoning
+      - streaming
     extra_body:
       reasoning_effort: high

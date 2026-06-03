@@ -44,12 +44,17 @@ class MultimodalResult(TestResult):
     response: str
 
 
+class StreamingResult(TestResult):
+    response: str
+
+
 class LLMReport(BaseModel):
     basic_completion: BasicCompletionResult
     tool_calling: ToolCallingResult | TestResult
     tool_calling_strict: ToolCallingResult | TestResult
     reasoning: ReasoningResult | TestResult
     multimodal: MultimodalResult | TestResult
+    streaming: StreamingResult | TestResult
 
 
 class ReportOutput(BaseModel):
@@ -91,6 +96,7 @@ for _entry in MODEL_LIST:
             "tool_calling": "tool_calling" in _caps,
             "reasoning": "reasoning" in _caps,
             "multimodal": "multimodal" in _caps,
+            "streaming": "streaming" in _caps,
             "extra_body": _entry.get("extra_body"),
         }
     elif isinstance(_entry, str) and _entry.strip():
@@ -98,6 +104,7 @@ for _entry in MODEL_LIST:
             "tool_calling": True,
             "reasoning": False,
             "multimodal": False,
+            "streaming": True,
             "extra_body": None,
         }
     else:
@@ -365,6 +372,36 @@ def run_reasoning_test(model: str, extra_body: dict | None = None) -> dict[str, 
     return {"response": choice.message.content or "", "reasoning_content": reasoning}
 
 
+def run_streaming_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
+    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {"max_tokens": 2048, "stream": True}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": "Count from 1 to 5, one number per line.",
+            }
+        ],
+        **kwargs,
+    )
+    parts: list[str] = []
+    for chunk in response:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        if choice.delta is None:
+            continue
+        if choice.delta.content is not None:
+            parts.append(choice.delta.content)
+    full_response = "".join(parts)
+    if not full_response.strip():
+        raise ValueError("Streaming returned no content")
+    return {"response": full_response}
+
+
 # ---------------------------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------------------------
@@ -422,6 +459,16 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("multimodal")
+        else _SKIPPED.copy()
+    )
+    results["streaming"] = (
+        run_test(
+            model,
+            "streaming",
+            run_streaming_test,
+            extra_body=_extra_body,
+        )
+        if config.get("streaming")
         else _SKIPPED.copy()
     )
 
