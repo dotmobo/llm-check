@@ -2,13 +2,14 @@ import base64
 import json
 import sys
 import time
+import httpx
 from pathlib import Path
 from typing import Any
 
 import yaml
 from openai import OpenAI
 from openai.types.chat.chat_completion_tool_param import ChatCompletionToolParam
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from rich.console import Console
 from rich.table import Table
@@ -21,40 +22,65 @@ from rich.text import Text
 
 
 class TestResult(BaseModel):
-    passed: bool
-    latency_ms: float
+    """Base result shared by all test types."""
+
+    passed: bool = False
+    latency_ms: float = 0.0
     skipped: bool = False
+    error: str | None = None
 
 
 class BasicCompletionResult(TestResult):
-    response: str
+    response: str = ""
 
 
 class ToolCallingResult(TestResult):
-    tool_calls: bool
-    tool_names: list[str]
+    tool_calls: bool = False
+    tool_names: list[str] = Field(default_factory=list)
 
 
 class ReasoningResult(TestResult):
-    response: str
-    reasoning_content: str
+    response: str = ""
+    reasoning_content: str = ""
 
 
 class MultimodalResult(TestResult):
-    response: str
+    response: str = ""
 
 
 class StreamingResult(TestResult):
-    response: str
+    response: str = ""
+
+
+class EmbeddingResult(TestResult):
+    embedding_dim: int = 0
+    embedding_norm: float = 0.0
+    embedding_sample: list[float] = Field(default_factory=list)
+
+    model_config = {"extra": "forbid"}
+
+
+# Sentinel skipped result — immutable copy used everywhere
+_SKIPPED_RESULT: dict[str, object] = {
+    "passed": False,
+    "skipped": True,
+    "latency_ms": 0.0,
+}
+
+
+def _skipped() -> dict[str, object]:
+    """Return a fresh copy of the skipped result dict."""
+    return dict(_SKIPPED_RESULT)
 
 
 class LLMReport(BaseModel):
     basic_completion: BasicCompletionResult
-    tool_calling: ToolCallingResult | TestResult
-    tool_calling_strict: ToolCallingResult | TestResult
-    reasoning: ReasoningResult | TestResult
-    multimodal: MultimodalResult | TestResult
-    streaming: StreamingResult | TestResult
+    tool_calling: ToolCallingResult
+    tool_calling_strict: ToolCallingResult
+    reasoning: ReasoningResult
+    multimodal: MultimodalResult
+    streaming: StreamingResult
+    embedding: EmbeddingResult = Field(default_factory=EmbeddingResult)
 
 
 class ReportOutput(BaseModel):
@@ -91,16 +117,25 @@ for _entry in MODEL_LIST:
                 file=sys.stderr,
             )
             continue
+        _model_type = _entry.get("type", "chat")
         _caps: list = _entry.get("capabilities", [])
-        MODEL_CONFIG[_name] = {
-            "tool_calling": "tool_calling" in _caps,
-            "reasoning": "reasoning" in _caps,
-            "multimodal": "multimodal" in _caps,
-            "streaming": "streaming" in _caps,
-            "extra_body": _entry.get("extra_body"),
-        }
+        if _model_type == "chat":
+            MODEL_CONFIG[_name] = {
+                "model_type": "chat",
+                "tool_calling": "tool_calling" in _caps,
+                "reasoning": "reasoning" in _caps,
+                "multimodal": "multimodal" in _caps,
+                "streaming": "streaming" in _caps,
+                "extra_body": _entry.get("extra_body"),
+            }
+        else:
+            MODEL_CONFIG[_name] = {
+                "model_type": _model_type,
+                "extra_body": _entry.get("extra_body"),
+            }
     elif isinstance(_entry, str) and _entry.strip():
         MODEL_CONFIG[_entry] = {
+            "model_type": "chat",
             "tool_calling": True,
             "reasoning": False,
             "multimodal": False,
@@ -402,17 +437,63 @@ def run_streaming_test(model: str, extra_body: dict | None = None) -> dict[str, 
     return {"response": full_response}
 
 
+def run_embedding_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
+    client = OpenAI(
+        base_url=BASE_URL,
+        api_key=API_KEY,
+        timeout=httpx.Timeout(timeout=30.0, connect=10.0),
+    )
+    kwargs: dict[str, Any] = {}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    response = client.embeddings.create(
+        model=model,
+        input="What is machine learning?",
+        **kwargs,
+    )
+    if not response.data:
+        raise ValueError("No embedding data returned")
+    embedding = response.data[0].embedding
+    dim = len(embedding)
+    if dim == 0:
+        raise ValueError("Embedding dimension is 0")
+    norm = sum(v**2 for v in embedding) ** 0.5
+    sample = embedding[:5]
+    return {
+        "embedding_dim": dim,
+        "embedding_norm": round(norm, 4),
+        "embedding_sample": [round(v, 6) for v in sample],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------------------------
-
-_SKIPPED: dict[str, Any] = {"passed": False, "skipped": True, "latency_ms": 0.0}
 
 
 def run_model_tests(model: str) -> dict[str, Any]:
     config = MODEL_CONFIG.get(model, {})
     results: dict[str, Any] = {}
     _extra_body = config.get("extra_body") or {}
+    _model_type = config.get("model_type", "chat")
+
+    if _model_type == "embedding":
+        results["embedding"] = run_test(
+            model,
+            "embedding",
+            run_embedding_test,
+            extra_body=_extra_body,
+        )
+        for _field in (
+            "basic_completion",
+            "tool_calling",
+            "tool_calling_strict",
+            "reasoning",
+            "multimodal",
+            "streaming",
+        ):
+            results[_field] = _skipped()
+        return results
 
     results["basic_completion"] = run_test(
         model,
@@ -429,7 +510,7 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("tool_calling")
-        else _SKIPPED.copy()
+        else _skipped()
     )
     results["tool_calling_strict"] = (
         run_test(
@@ -439,7 +520,7 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("tool_calling")
-        else _SKIPPED.copy()
+        else _skipped()
     )
     results["reasoning"] = (
         run_test(
@@ -449,7 +530,7 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("reasoning")
-        else _SKIPPED.copy()
+        else _skipped()
     )
     results["multimodal"] = (
         run_test(
@@ -459,7 +540,7 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("multimodal")
-        else _SKIPPED.copy()
+        else _skipped()
     )
     results["streaming"] = (
         run_test(
@@ -469,7 +550,7 @@ def run_model_tests(model: str) -> dict[str, Any]:
             extra_body=_extra_body,
         )
         if config.get("streaming")
-        else _SKIPPED.copy()
+        else _skipped()
     )
 
     return results
@@ -527,6 +608,14 @@ def print_report(all_results: dict[str, Any]) -> None:
                     resp = result["reasoning_content"][:120]
                     suffix = "…" if len(result["reasoning_content"]) > 120 else ""
                     detail = Text(f"{resp}{suffix}", style="dim")
+                elif result.get("embedding_dim"):
+                    sample_str = ", ".join(
+                        f"{v:.4f}" for v in result.get("embedding_sample", [])
+                    )
+                    detail = Text(
+                        f"dim={result['embedding_dim']}, norm={result.get('embedding_norm', 0):.4f}, sample=[{sample_str}]",
+                        style="dim",
+                    )
                 elif result.get("response"):
                     resp = result["response"][:120]
                     suffix = "…" if len(result["response"]) > 120 else ""

@@ -1,6 +1,6 @@
 # llm-check
 
-A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming) for monitoring.
+A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming, embedding) for monitoring.
 
 ## Features
 
@@ -9,6 +9,7 @@ A Python script to verify LLM inference server capabilities (basic completion, t
 - Tests reasoning content
 - Tests multimodal (image understanding)
 - Tests streaming mode
+- Tests embedding (vectorization)
 - Skips tests based on model capabilities defined in config
 - Human-readable colored console report
 - JSON report output for monitoring tools
@@ -29,6 +30,8 @@ llm:
   token: your-api-key
 
 models:
+  - name: bge-m3
+    type: embedding
   - name: gpt-oss-120b
     capabilities:
       - tool_calling
@@ -62,11 +65,21 @@ models:
       reasoning_effort: high
 ```
 
-Supported capabilities:
+Each model entry supports a `type` field to specify the model category:
+
+- `chat` (default) — model is tested for chat-based capabilities (`tool_calling`, `reasoning`, `multimodal`, `streaming`)
+- `embedding` — model is tested for embedding/vectorization capabilities
+
+If `type` is omitted, the model defaults to `chat` behavior.
+
+### Chat model capabilities
+
 - `tool_calling` — the model can call tools/functions
 - `reasoning` — the model produces reasoning content
 - `multimodal` — the model can understand images
 - `streaming` — the model supports streaming responses
+
+### Model type
 
 Some models require `extra_body` for reasoning tests:
 - `chat_template_kwargs` — e.g. `enable_thinking: true` (qwen, gemma)

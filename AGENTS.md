@@ -10,8 +10,10 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 
 ## Config
 
-`config.yaml` has a `llm` section (`base_url`, `token`) and a `models` section (list of dicts with `name` + `capabilities`).
-- Capabilities: `tool_calling`, `reasoning`, `multimodal`.
+`config.yaml` has a `llm` section (`base_url`, `token`) and a `models` section (list of dicts with `name` + optional `type` + `capabilities`).
+- Each model entry has a `type` field: `chat` (default), `embedding`, `rerank` (coming soon).
+- If `type` is not specified, it defaults to `chat` (backward compatible).
+- Chat models support capabilities: `tool_calling`, `reasoning`, `multimodal`, `streaming`.
 - Legacy format `model_capabilities` with string codes (`tc`, `r`, `m`) is still supported but deprecated.
 - **Never** use `.env` — that was removed. Use `config.yaml` only.
 - Models without a capability flag get a `{"passed": false, "skipped": true}` result (not `FAIL`).
@@ -20,11 +22,13 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 ## Key implementation details
 
 - `main.py` is the only source file. All logic is at module level (config loading, test functions, report, main).
-- `MODEL_CONFIG` is a module-level dict built from `config.yaml`'s `models` list.
+- `MODEL_CONFIG` is a module-level dict built from `config.yaml`'s `models` list. Each entry includes `model_type`.
 - `model_extra.get("reasoning_content")` is how reasoning content is accessed (OpenAI-specific).
 - `max_tokens=2048` for all tests.
 - `_IMAGE_BASE64` is loaded once at import time from `data/multimodal_test.png`.
 - Colored console output uses ANSI codes only when `_isatty()` is true.
+- `EmbeddingResult` Pydantic model stores `embedding_dim`, `embedding_norm`, `embedding_sample` for embedding models.
+- `LLMReport` includes `embedding: EmbeddingResult | TestResult`.
 
 ## Development commands
 
@@ -41,10 +45,11 @@ All checks (`ruff check`, `ruff format`, `ty`, `pytest`) must pass before commit
 
 ## Adding a model
 
-Edit `config.yaml` → add a new entry under `models:` with `name` and `capabilities`. No code changes needed.
+Edit `config.yaml` → add a new entry under `models:` with `name` and optionally `type` (default: `chat`) + `capabilities` (for `chat` models). No code changes needed.
 
 ## Known quirks
 
 - `basic_completion` is always run regardless of capabilities.
 - Tool calling, reasoning, multimodal are skipped (not failed) if the model doesn't declare the capability.
+- Models with `type: embedding` only run the embedding test (no chat tests).
 - The multimodal test will raise if `data/multimodal_test.png` is missing.

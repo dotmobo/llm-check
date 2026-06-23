@@ -3,6 +3,8 @@ llm:
   token: s3cr3t
 
 models:
+  - name: bge-m3
+    type: embedding
   - name: gpt-oss-120b
     capabilities:
       - tool_calling

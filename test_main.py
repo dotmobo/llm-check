@@ -16,11 +16,13 @@ from main import (
     run_multimodal_test,
     run_reasoning_test,
     run_streaming_test,
+    run_embedding_test,
     run_model_tests,
     print_report,
     save_json_report,
     LLMReport,
     ReportOutput,
+    EmbeddingResult,
 )
 
 
@@ -322,7 +324,8 @@ class TestRunModelTests:
                     return_value={"tool_calls": True},
                 ) as mock_tool_strict:
                     with patch.dict(
-                        "main.MODEL_CONFIG", {"test-model": {"tool_calling": False}}
+                        "main.MODEL_CONFIG",
+                        {"test-model": {"tool_calling": False, "model_type": "chat"}},
                     ):
                         result = run_model_tests("test-model")
 
@@ -363,6 +366,7 @@ class TestRunModelTests:
                                     "main.MODEL_CONFIG",
                                     {
                                         "test-model": {
+                                            "model_type": "chat",
                                             "tool_calling": True,
                                             "reasoning": True,
                                             "multimodal": True,
@@ -402,6 +406,7 @@ class TestRunModelTests:
                                     "main.MODEL_CONFIG",
                                     {
                                         "test-model": {
+                                            "model_type": "chat",
                                             "tool_calling": False,
                                             "reasoning": False,
                                             "multimodal": False,
@@ -584,12 +589,13 @@ class TestConfig:
         assert all(isinstance(v, dict) for v in MODEL_CONFIG.values())
 
     def test_model_config_has_capabilities(self):
-        """Every model config has expected capability keys."""
+        """Every chat model config has expected capability keys."""
         for caps in MODEL_CONFIG.values():
-            assert "tool_calling" in caps
-            assert "reasoning" in caps
-            assert "multimodal" in caps
-            assert "streaming" in caps
+            if caps.get("model_type") == "chat":
+                assert "tool_calling" in caps
+                assert "reasoning" in caps
+                assert "multimodal" in caps
+                assert "streaming" in caps
 
     def test_test_tool_structure(self):
         """TEST_TOOL has the expected structure."""
@@ -766,6 +772,11 @@ class TestPydanticModels:
                             "latency_ms": 150.0,
                             "response": "streamed response",
                         },
+                        "embedding": {
+                            "passed": False,
+                            "skipped": True,
+                            "latency_ms": 0.0,
+                        },
                     }
                 )
             }
@@ -814,12 +825,17 @@ class TestPydanticModels:
                     "latency_ms": 100.0,
                     "response": "streamed",
                 },
+                "embedding": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
             }
         )
         assert report.basic_completion.passed is True
-        assert report.tool_calling.tool_calls is True  # ty: ignore[unresolved-attribute]
-        assert report.tool_calling_strict.tool_calls is True  # ty: ignore[unresolved-attribute]
-        assert report.reasoning.reasoning_content == "1+1=2"  # ty: ignore[unresolved-attribute]
+        assert report.tool_calling.tool_calls is True
+        assert report.tool_calling_strict.tool_calls is True
+        assert report.reasoning.reasoning_content == "1+1=2"
         assert report.streaming.response == "streamed"
 
     def test_skipped_result_defaults(self):
@@ -840,6 +856,7 @@ class TestPydanticModels:
                 "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
             }
         )
         assert report.tool_calling.skipped is True
@@ -895,6 +912,11 @@ class TestSaveJsonReport:
                                 "latency_ms": 0.0,
                             },
                             "streaming": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0.0,
+                            },
+                            "embedding": {
                                 "passed": False,
                                 "skipped": True,
                                 "latency_ms": 0.0,
@@ -992,3 +1014,191 @@ class TestStreaming:
         call_kwargs = MockOpenAI.return_value.chat.completions.create.call_args[1]
         assert call_kwargs["stream"] is True
         assert call_kwargs["extra_body"]["stream_options"] == {"include_usage": True}
+
+
+# --- run_embedding_test ---
+
+
+class TestEmbedding:
+    def test_embedding_returns_dim_norm_and_sample(self):
+        """Embedding test returns dimension, norm, and first 5 values."""
+        mock_embedding_data = MagicMock()
+        mock_embedding_data.embedding = [
+            0.1,
+            0.2,
+            0.3,
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            1.0,
+        ]
+        mock_response = MagicMock()
+        mock_response.data = [mock_embedding_data]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.embeddings.create.return_value = mock_response
+            result = run_embedding_test("bge-m3")
+
+        assert result["embedding_dim"] == 10
+        assert result["embedding_norm"] > 0
+        assert len(result["embedding_sample"]) == 5
+        assert result["embedding_sample"][0] == 0.1
+
+    def test_embedding_raises_on_no_data(self):
+        """Raises ValueError when no embedding data is returned."""
+        mock_response = MagicMock()
+        mock_response.data = None
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.embeddings.create.return_value = mock_response
+            with pytest.raises(ValueError, match="No embedding data returned"):
+                run_embedding_test("bge-m3")
+
+    def test_embedding_raises_on_zero_dimension(self):
+        """Raises ValueError when embedding dimension is 0."""
+        mock_embedding_data = MagicMock()
+        mock_embedding_data.embedding = []
+        mock_response = MagicMock()
+        mock_response.data = [mock_embedding_data]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.embeddings.create.return_value = mock_response
+            with pytest.raises(ValueError, match="Embedding dimension is 0"):
+                run_embedding_test("bge-m3")
+
+    def test_embedding_passes_extra_body(self):
+        """extra_body is passed via kwargs."""
+        mock_embedding_data = MagicMock()
+        mock_embedding_data.embedding = [0.1, 0.2, 0.3]
+        mock_response = MagicMock()
+        mock_response.data = [mock_embedding_data]
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.embeddings.create.return_value = mock_response
+            run_embedding_test("bge-m3", extra_body={"encoding_format": "float"})
+
+        MockOpenAI.return_value.embeddings.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.embeddings.create.call_args[1]
+        assert call_kwargs["extra_body"]["encoding_format"] == "float"
+
+
+# --- Pydantic models for embedding ---
+
+
+class TestEmbeddingPydantic:
+    def test_embedding_result_validation(self):
+        """EmbeddingResult validates correctly."""
+        result = EmbeddingResult.model_validate(
+            {
+                "passed": True,
+                "latency_ms": 100.0,
+                "embedding_dim": 1024,
+                "embedding_norm": 1.2345,
+                "embedding_sample": [0.1, 0.2, 0.3, 0.4, 0.5],
+            }
+        )
+        assert result.passed is True
+        assert result.embedding_dim == 1024
+        assert result.embedding_norm == 1.2345
+        assert result.embedding_sample == [0.1, 0.2, 0.3, 0.4, 0.5]
+
+    def test_llm_report_with_embedding(self):
+        """LLMReport validates with embedding field."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 50.0,
+                    "response": "hi",
+                },
+                "tool_calling": {
+                    "passed": True,
+                    "latency_ms": 60.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "tool_calling_strict": {
+                    "passed": True,
+                    "latency_ms": 70.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "reasoning": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "multimodal": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "streaming": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "embedding": {
+                    "passed": True,
+                    "latency_ms": 80.0,
+                    "embedding_dim": 768,
+                    "embedding_norm": 0.9876,
+                    "embedding_sample": [0.01, 0.02, 0.03, 0.04, 0.05],
+                },
+            }
+        )
+        assert report.embedding.passed is True
+        assert report.embedding.embedding_dim == 768
+
+    def test_embedding_skipped_result(self):
+        """Skipped embedding has correct defaults."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 10.0,
+                    "response": "test",
+                },
+                "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "tool_calling_strict": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
+            }
+        )
+        assert report.embedding.skipped is True
+        assert report.embedding.passed is False
+
+
+# --- run_model_tests embedding routing ---
+
+
+class TestRunModelTestsEmbedding:
+    def test_embedding_model_only_runs_embedding(self):
+        """Models with type=embedding only run the embedding test."""
+        with patch(
+            "main.run_embedding_test",
+            return_value={
+                "passed": True,
+                "embedding_dim": 1024,
+                "embedding_norm": 1.0,
+                "embedding_sample": [0.1, 0.2, 0.3, 0.4, 0.5],
+            },
+        ) as mock_embed:
+            with patch.dict(
+                "main.MODEL_CONFIG",
+                {"bge-m3": {"model_type": "embedding"}},
+            ):
+                result = run_model_tests("bge-m3")
+
+        assert "embedding" in result
+        assert result["embedding"]["passed"] is True
+        mock_embed.assert_called_once()

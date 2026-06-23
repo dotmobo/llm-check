@@ -11,7 +11,7 @@ wheels/
 
 # Secrets
 .env
-config.yaml
+config*.yaml
 
 # Generated output
 output/
