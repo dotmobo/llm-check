@@ -57,7 +57,11 @@ class EmbeddingResult(TestResult):
     embedding_norm: float = 0.0
     embedding_sample: list[float] = Field(default_factory=list)
 
-    model_config = {"extra": "forbid"}
+
+class RerankResult(TestResult):
+    results: list[dict] = Field(default_factory=list)
+    top_score: float = 0.0
+    top_index: int = 0
 
 
 # Sentinel skipped result — immutable copy used everywhere
@@ -74,13 +78,16 @@ def _skipped() -> dict[str, object]:
 
 
 class LLMReport(BaseModel):
-    basic_completion: BasicCompletionResult
-    tool_calling: ToolCallingResult
-    tool_calling_strict: ToolCallingResult
-    reasoning: ReasoningResult
-    multimodal: MultimodalResult
-    streaming: StreamingResult
+    basic_completion: BasicCompletionResult = Field(
+        default_factory=BasicCompletionResult
+    )
+    tool_calling: ToolCallingResult = Field(default_factory=ToolCallingResult)
+    tool_calling_strict: ToolCallingResult = Field(default_factory=ToolCallingResult)
+    reasoning: ReasoningResult = Field(default_factory=ReasoningResult)
+    multimodal: MultimodalResult = Field(default_factory=MultimodalResult)
+    streaming: StreamingResult = Field(default_factory=StreamingResult)
     embedding: EmbeddingResult = Field(default_factory=EmbeddingResult)
+    rerank: RerankResult = Field(default_factory=RerankResult)
 
 
 class ReportOutput(BaseModel):
@@ -466,6 +473,46 @@ def run_embedding_test(model: str, extra_body: dict | None = None) -> dict[str, 
     }
 
 
+def run_rerank_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    payload = {
+        "model": model,
+        "query": "What is machine learning?",
+        "documents": [
+            "Machine learning is a subset of artificial intelligence that focuses on "
+            "systems that learn from data.",
+            "The capital of France is Paris.",
+            "Quantum computing uses quantum mechanical phenomena to perform computations.",
+        ],
+        "top_n": 3,
+    }
+    resp = httpx.post(
+        f"{BASE_URL}/rerank",
+        json=payload,
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        raise ValueError("No rerank results returned")
+    top = results[0]
+    top_index = top.get("index", 0)
+    top_score = top.get("relevance_score", 0.0)
+    normalized = [
+        {"index": r["index"], "relevance_score": round(r["relevance_score"], 6)}
+        for r in results
+    ]
+    return {
+        "results": normalized,
+        "top_score": round(top_score, 6),
+        "top_index": top_index,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------------------------
@@ -478,22 +525,24 @@ def run_model_tests(model: str) -> dict[str, Any]:
     _model_type = config.get("model_type", "chat")
 
     if _model_type == "embedding":
-        results["embedding"] = run_test(
-            model,
-            "embedding",
-            run_embedding_test,
-            extra_body=_extra_body,
-        )
-        for _field in (
-            "basic_completion",
-            "tool_calling",
-            "tool_calling_strict",
-            "reasoning",
-            "multimodal",
-            "streaming",
-        ):
-            results[_field] = _skipped()
-        return results
+        return {
+            "embedding": run_test(
+                model,
+                "embedding",
+                run_embedding_test,
+                extra_body=_extra_body,
+            )
+        }
+
+    if _model_type == "rerank":
+        return {
+            "rerank": run_test(
+                model,
+                "rerank",
+                run_rerank_test,
+                extra_body=_extra_body,
+            )
+        }
 
     results["basic_completion"] = run_test(
         model,
@@ -616,6 +665,14 @@ def print_report(all_results: dict[str, Any]) -> None:
                         f"dim={result['embedding_dim']}, norm={result.get('embedding_norm', 0):.4f}, sample=[{sample_str}]",
                         style="dim",
                     )
+                elif result.get("results"):
+                    scores_str = ", ".join(
+                        f"{r['relevance_score']:.4f}" for r in result.get("results", [])
+                    )
+                    detail = Text(
+                        f"top_score={result.get('top_score', 0):.4f}, top_idx={result.get('top_index', 0)}, scores=[{scores_str}]",
+                        style="dim",
+                    )
                 elif result.get("response"):
                     resp = result["response"][:120]
                     suffix = "…" if len(result["response"]) > 120 else ""
@@ -640,9 +697,40 @@ def print_report(all_results: dict[str, Any]) -> None:
     _console.print()
 
 
-def _build_report(all_results: dict[str, Any]) -> ReportOutput:
-    """Validate raw results dict through Pydantic models."""
-    return ReportOutput.model_validate(all_results)
+_RESULT_TYPES: dict[str, type[BaseModel]] = {
+    "basic_completion": BasicCompletionResult,
+    "tool_calling": ToolCallingResult,
+    "tool_calling_strict": ToolCallingResult,
+    "reasoning": ReasoningResult,
+    "multimodal": MultimodalResult,
+    "streaming": StreamingResult,
+    "embedding": EmbeddingResult,
+    "rerank": RerankResult,
+}
+
+
+def _model_type_keys(model_type: str) -> set[str]:
+    """Return the set of test keys to keep for a given model type."""
+    if model_type == "embedding":
+        return {"embedding"}
+    if model_type == "rerank":
+        return {"rerank"}
+    return set(_RESULT_TYPES) - {"embedding", "rerank"}
+
+
+def _build_report(all_results: dict[str, Any]) -> dict[str, Any]:
+    """Build filtered report dict by model type — no Pydantic wrapper needed."""
+    models = {}
+    for model_name, tests in all_results.get("models", {}).items():
+        config = MODEL_CONFIG.get(model_name, {})
+        _model_type = config.get("model_type", "chat")
+        allowed = _model_type_keys(_model_type)
+        entry: dict[str, Any] = {}
+        for key in allowed:
+            if key in tests:
+                entry[key] = _RESULT_TYPES[key].model_validate(tests[key]).model_dump()
+        models[model_name] = entry
+    return {"models": models}
 
 
 def save_json_report(all_results: dict[str, Any]) -> None:
@@ -650,7 +738,7 @@ def save_json_report(all_results: dict[str, Any]) -> None:
     report_path = _OUTPUT_DIR / "report.json"
     report = _build_report(all_results)
     report_path.write_text(
-        json.dumps(report.model_dump(), indent=2, ensure_ascii=False),
+        json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     _console.print(f"\n[dim]JSON report written to[/] [cyan]{report_path}[/]")

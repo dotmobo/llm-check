@@ -5,6 +5,8 @@ llm:
 models:
   - name: bge-m3
     type: embedding
+  - name: bge-reranker-v2-m3
+    type: rerank
   - name: gpt-oss-120b
     capabilities:
       - tool_calling

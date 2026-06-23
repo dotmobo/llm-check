@@ -11,7 +11,7 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 ## Config
 
 `config.yaml` has a `llm` section (`base_url`, `token`) and a `models` section (list of dicts with `name` + optional `type` + `capabilities`).
-- Each model entry has a `type` field: `chat` (default), `embedding`, `rerank` (coming soon).
+- Each model entry has a `type` field: `chat` (default), `embedding`, `rerank`.
 - If `type` is not specified, it defaults to `chat` (backward compatible).
 - Chat models support capabilities: `tool_calling`, `reasoning`, `multimodal`, `streaming`.
 - Legacy format `model_capabilities` with string codes (`tc`, `r`, `m`) is still supported but deprecated.
@@ -28,7 +28,8 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 - `_IMAGE_BASE64` is loaded once at import time from `data/multimodal_test.png`.
 - Colored console output uses ANSI codes only when `_isatty()` is true.
 - `EmbeddingResult` Pydantic model stores `embedding_dim`, `embedding_norm`, `embedding_sample` for embedding models.
-- `LLMReport` includes `embedding: EmbeddingResult | TestResult`.
+- `RerankResult` Pydantic model stores `results`, `top_score`, `top_index` for rerank models.
+- `LLMReport` includes `embedding: EmbeddingResult`, `rerank: RerankResult`.
 
 ## Development commands
 
@@ -52,4 +53,5 @@ Edit `config.yaml` → add a new entry under `models:` with `name` and optionall
 - `basic_completion` is always run regardless of capabilities.
 - Tool calling, reasoning, multimodal are skipped (not failed) if the model doesn't declare the capability.
 - Models with `type: embedding` only run the embedding test (no chat tests).
+- Models with `type: rerank` only run the rerank test (no chat tests).
 - The multimodal test will raise if `data/multimodal_test.png` is missing.

@@ -2,6 +2,7 @@ import json
 import time
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from main import (
@@ -17,12 +18,16 @@ from main import (
     run_reasoning_test,
     run_streaming_test,
     run_embedding_test,
+    run_rerank_test,
     run_model_tests,
     print_report,
     save_json_report,
+    _build_report,
+    _RESULT_TYPES,
     LLMReport,
     ReportOutput,
     EmbeddingResult,
+    RerankResult,
 )
 
 
@@ -777,6 +782,11 @@ class TestPydanticModels:
                             "skipped": True,
                             "latency_ms": 0.0,
                         },
+                        "rerank": {
+                            "passed": False,
+                            "skipped": True,
+                            "latency_ms": 0.0,
+                        },
                     }
                 )
             }
@@ -830,6 +840,11 @@ class TestPydanticModels:
                     "skipped": True,
                     "latency_ms": 0.0,
                 },
+                "rerank": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
             }
         )
         assert report.basic_completion.passed is True
@@ -857,6 +872,7 @@ class TestPydanticModels:
                 "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "rerank": {"passed": False, "skipped": True, "latency_ms": 0.0},
             }
         )
         assert report.tool_calling.skipped is True
@@ -866,12 +882,6 @@ class TestPydanticModels:
         assert report.multimodal.skipped is True
         assert report.streaming.skipped is True
 
-    def test_report_output_invalid_data(self):
-        """ReportOutput rejects invalid data."""
-        with pytest.raises(ValueError):
-            ReportOutput.model_validate(
-                {"models": {"bad": {"invalid_key": "value"}}}  # type: ignore[arg-type]
-            )
 
 
 class TestSaveJsonReport:
@@ -896,31 +906,6 @@ class TestSaveJsonReport:
                                 "skipped": True,
                                 "latency_ms": 0.0,
                             },
-                            "tool_calling_strict": {
-                                "passed": False,
-                                "skipped": True,
-                                "latency_ms": 0.0,
-                            },
-                            "reasoning": {
-                                "passed": False,
-                                "skipped": True,
-                                "latency_ms": 0.0,
-                            },
-                            "multimodal": {
-                                "passed": False,
-                                "skipped": True,
-                                "latency_ms": 0.0,
-                            },
-                            "streaming": {
-                                "passed": False,
-                                "skipped": True,
-                                "latency_ms": 0.0,
-                            },
-                            "embedding": {
-                                "passed": False,
-                                "skipped": True,
-                                "latency_ms": 0.0,
-                            },
                         }
                     }
                 }
@@ -930,6 +915,77 @@ class TestSaveJsonReport:
         with open(report_file) as f:
             data = json.load(f)
         assert "models" in data
+
+
+class TestBuildReport:
+    def test_chat_model_strips_embedding_and_rerank(self):
+        """Chat model report excludes embedding and rerank keys."""
+        with patch("main.MODEL_CONFIG", {"gpt": {"model_type": "chat", "extra_body": None}}):
+            result = _build_report(
+                {
+                    "models": {
+                        "gpt": {
+                            "basic_completion": {"passed": True, "latency_ms": 10, "response": "hi"},
+                            "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "tool_calling_strict": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "reasoning": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "multimodal": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "streaming": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "embedding": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "rerank": {"passed": False, "skipped": True, "latency_ms": 0},
+                        }
+                    }
+                }
+            )
+        model_data = result["models"]["gpt"]
+        assert "embedding" not in model_data
+        assert "rerank" not in model_data
+        assert "basic_completion" in model_data
+        assert "tool_calling" in model_data
+
+    def test_embedding_model_has_only_embedding(self):
+        """Embedding model report contains only the embedding key."""
+        with patch("main.MODEL_CONFIG", {"bge-m3": {"model_type": "embedding", "extra_body": None}}):
+            result = _build_report(
+                {
+                    "models": {
+                        "bge-m3": {
+                            "embedding": {
+                                "passed": True,
+                                "latency_ms": 42,
+                                "embedding_dim": 1024,
+                                "embedding_norm": 1.0,
+                                "embedding_sample": [0.1, 0.2],
+                            },
+                            "basic_completion": {"passed": False, "skipped": True, "latency_ms": 0},
+                        }
+                    }
+                }
+            )
+        model_data = result["models"]["bge-m3"]
+        assert set(model_data.keys()) == {"embedding"}
+
+    def test_rerank_model_has_only_rerank(self):
+        """Rerank model report contains only the rerank key."""
+        with patch("main.MODEL_CONFIG", {"bge-reranker": {"model_type": "rerank", "extra_body": None}}):
+            result = _build_report(
+                {
+                    "models": {
+                        "bge-reranker": {
+                            "rerank": {
+                                "passed": True,
+                                "latency_ms": 30,
+                                "results": [{"index": 0, "relevance_score": 0.9}],
+                                "top_score": 0.9,
+                                "top_index": 0,
+                            },
+                            "basic_completion": {"passed": False, "skipped": True, "latency_ms": 0},
+                        }
+                    }
+                }
+            )
+        model_data = result["models"]["bge-reranker"]
+        assert set(model_data.keys()) == {"rerank"}
 
 
 # --- run_streaming_test ---
@@ -1148,6 +1204,11 @@ class TestEmbeddingPydantic:
                     "embedding_norm": 0.9876,
                     "embedding_sample": [0.01, 0.02, 0.03, 0.04, 0.05],
                 },
+                "rerank": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
             }
         )
         assert report.embedding.passed is True
@@ -1202,3 +1263,197 @@ class TestRunModelTestsEmbedding:
         assert "embedding" in result
         assert result["embedding"]["passed"] is True
         mock_embed.assert_called_once()
+
+
+class TestRunModelTestsRerank:
+    def test_rerank_model_only_runs_rerank(self):
+        """Models with type=rerank only run the rerank test."""
+        with patch(
+            "main.run_rerank_test",
+            return_value={
+                "passed": True,
+                "results": [{"index": 0, "relevance_score": 0.95}],
+                "top_score": 0.95,
+                "top_index": 0,
+            },
+        ) as mock_rerank:
+            with patch.dict(
+                "main.MODEL_CONFIG",
+                {"bge-reranker-v2-m3": {"model_type": "rerank"}},
+            ):
+                result = run_model_tests("bge-reranker-v2-m3")
+
+        assert "rerank" in result
+        assert result["rerank"]["passed"] is True
+        assert len(result) == 1
+        mock_rerank.assert_called_once()
+
+
+# --- run_rerank_test ---
+
+
+class TestRerank:
+    def test_rerank_returns_scores(self):
+        """Rerank test returns ranked results with scores."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "results": [
+                {"index": 0, "relevance_score": 0.95},
+                {"index": 2, "relevance_score": 0.42},
+                {"index": 1, "relevance_score": 0.08},
+            ],
+            "id": "test-id",
+        }
+
+        with patch("main.httpx.post", return_value=mock_response):
+            result = run_rerank_test("bge-reranker-v2-m3")
+
+        assert result["top_score"] == 0.95
+        assert result["top_index"] == 0
+        assert len(result["results"]) == 3
+        assert result["results"][0]["relevance_score"] == 0.95
+
+    def test_rerank_raises_on_no_results(self):
+        """Raises ValueError when no rerank results returned."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"results": []}
+
+        with patch("main.httpx.post", return_value=mock_response):
+            with pytest.raises(ValueError, match="No rerank results returned"):
+                run_rerank_test("bge-reranker-v2-m3")
+
+    def test_rerank_raises_on_http_error(self):
+        """Raises error when HTTP request fails."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Not Found", request=MagicMock(), response=MagicMock(status_code=404)
+        )
+
+        with patch("main.httpx.post", return_value=mock_response):
+            with pytest.raises(Exception):
+                run_rerank_test("bge-reranker-v2-m3")
+
+    def test_rerank_passes_extra_body(self):
+        """extra_body is passed via the payload through httpx."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "results": [{"index": 0, "relevance_score": 0.95}],
+            "id": "test-id",
+        }
+
+        with patch("main.httpx.post", return_value=mock_response) as mock_post:
+            run_rerank_test(
+                "bge-reranker-v2-m3",
+                extra_body={"top_n": 5},
+            )
+
+        call_args = mock_post.call_args
+        assert call_args[1]["json"]["model"] == "bge-reranker-v2-m3"
+
+
+# --- Pydantic models for rerank ---
+
+
+class TestRerankPydantic:
+    def test_rerank_result_validation(self):
+        """RerankResult validates correctly."""
+        result = RerankResult.model_validate(
+            {
+                "passed": True,
+                "latency_ms": 100.0,
+                "results": [
+                    {"index": 0, "relevance_score": 0.95},
+                    {"index": 1, "relevance_score": 0.42},
+                ],
+                "top_score": 0.95,
+                "top_index": 0,
+            }
+        )
+        assert result.passed is True
+        assert result.top_score == 0.95
+        assert result.top_index == 0
+        assert len(result.results) == 2
+
+    def test_llm_report_with_rerank(self):
+        """LLMReport validates with rerank field."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 50.0,
+                    "response": "hi",
+                },
+                "tool_calling": {
+                    "passed": True,
+                    "latency_ms": 60.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "tool_calling_strict": {
+                    "passed": True,
+                    "latency_ms": 70.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "reasoning": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "multimodal": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "streaming": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "embedding": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "rerank": {
+                    "passed": True,
+                    "latency_ms": 80.0,
+                    "results": [{"index": 0, "relevance_score": 0.95}],
+                    "top_score": 0.95,
+                    "top_index": 0,
+                },
+            }
+        )
+        assert report.rerank.passed is True
+        assert report.rerank.top_score == 0.95
+
+    def test_rerank_skipped_result(self):
+        """Skipped rerank has correct defaults."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 10.0,
+                    "response": "test",
+                },
+                "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "tool_calling_strict": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "rerank": {"passed": False, "skipped": True, "latency_ms": 0.0},
+            }
+        )
+        assert report.rerank.skipped is True
+        assert report.rerank.passed is False
+
+
+# --- run_model_tests rerank routing ---

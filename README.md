@@ -1,6 +1,6 @@
 # llm-check
 
-A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming, embedding) for monitoring.
+A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming, embedding, rerank) for monitoring.
 
 ## Features
 
@@ -10,6 +10,7 @@ A Python script to verify LLM inference server capabilities (basic completion, t
 - Tests multimodal (image understanding)
 - Tests streaming mode
 - Tests embedding (vectorization)
+- Tests rerank (document re-ranking)
 - Skips tests based on model capabilities defined in config
 - Human-readable colored console report
 - JSON report output for monitoring tools
@@ -69,6 +70,7 @@ Each model entry supports a `type` field to specify the model category:
 
 - `chat` (default) — model is tested for chat-based capabilities (`tool_calling`, `reasoning`, `multimodal`, `streaming`)
 - `embedding` — model is tested for embedding/vectorization capabilities
+- `rerank` — model is tested for document re-ranking capabilities
 
 If `type` is omitted, the model defaults to `chat` behavior.
 
