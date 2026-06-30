@@ -6,12 +6,13 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 - `test_main.py` — unit tests (pytest, mocked OpenAI responses).
 - `config.yaml` — live config (gitignored). Copy from `.config.yaml.example` to set up.
 - `data/multimodal_test.png` — test image for multimodal test (base64-encoded at import).
+- `data/bonjour.mp3` — test audio for transcription test.
 - `output/report.json` — generated JSON report (gitignored).
 
 ## Config
 
 `config.yaml` has a `llm` section (`base_url`, `token`) and a `models` section (list of dicts with `name` + optional `type` + `capabilities`).
-- Each model entry has a `type` field: `chat` (default), `embedding`, `rerank`.
+- Each model entry has a `type` field: `chat` (default), `embedding`, `rerank`, `transcription`.
 - If `type` is not specified, it defaults to `chat` (backward compatible).
 - Chat models support capabilities: `tool_calling`, `reasoning`, `multimodal`, `streaming`.
 - Legacy format `model_capabilities` with string codes (`tc`, `r`, `m`) is still supported but deprecated.
@@ -29,7 +30,8 @@ Single-module Python project (`main.py`). Entry point: `python main.py`.
 - Colored console output uses ANSI codes only when `_isatty()` is true.
 - `EmbeddingResult` Pydantic model stores `embedding_dim`, `embedding_norm`, `embedding_sample` for embedding models.
 - `RerankResult` Pydantic model stores `results`, `top_score`, `top_index` for rerank models.
-- `LLMReport` includes `embedding: EmbeddingResult`, `rerank: RerankResult`.
+- `TranscriptionResult` Pydantic model stores `response` for transcription models.
+- `LLMReport` includes `embedding: EmbeddingResult`, `rerank: RerankResult`, `transcription: TranscriptionResult`.
 
 ## Development commands
 
@@ -54,4 +56,5 @@ Edit `config.yaml` → add a new entry under `models:` with `name` and optionall
 - Tool calling, reasoning, multimodal are skipped (not failed) if the model doesn't declare the capability.
 - Models with `type: embedding` only run the embedding test (no chat tests).
 - Models with `type: rerank` only run the rerank test (no chat tests).
+- Models with `type: transcription` only run the transcription test (no chat tests).
 - The multimodal test will raise if `data/multimodal_test.png` is missing.

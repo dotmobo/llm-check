@@ -17,17 +17,18 @@ from main import (
     run_multimodal_test,
     run_reasoning_test,
     run_streaming_test,
+    run_transcription_test,
     run_embedding_test,
     run_rerank_test,
     run_model_tests,
     print_report,
     save_json_report,
     _build_report,
-    _RESULT_TYPES,
     LLMReport,
     ReportOutput,
     EmbeddingResult,
     RerankResult,
+    TranscriptionResult,
 )
 
 
@@ -777,6 +778,11 @@ class TestPydanticModels:
                             "latency_ms": 150.0,
                             "response": "streamed response",
                         },
+                        "transcription": {
+                            "passed": True,
+                            "latency_ms": 180.0,
+                            "response": "transcribed text",
+                        },
                         "embedding": {
                             "passed": False,
                             "skipped": True,
@@ -797,6 +803,10 @@ class TestPydanticModels:
         assert data["models"]["test-model"]["basic_completion"]["response"] == "hello"
         assert data["models"]["test-model"]["reasoning"]["skipped"] is True
         assert data["models"]["test-model"]["tool_calling_strict"]["tool_calls"] is True
+        assert (
+            data["models"]["test-model"]["transcription"]["response"]
+            == "transcribed text"
+        )
 
     def test_llm_report_validates(self):
         """LLMReport validates its structure."""
@@ -835,6 +845,11 @@ class TestPydanticModels:
                     "latency_ms": 100.0,
                     "response": "streamed",
                 },
+                "transcription": {
+                    "passed": True,
+                    "latency_ms": 110.0,
+                    "response": "transcription",
+                },
                 "embedding": {
                     "passed": False,
                     "skipped": True,
@@ -852,6 +867,7 @@ class TestPydanticModels:
         assert report.tool_calling_strict.tool_calls is True
         assert report.reasoning.reasoning_content == "1+1=2"
         assert report.streaming.response == "streamed"
+        assert report.transcription.response == "transcription"
 
     def test_skipped_result_defaults(self):
         """Skipped results have correct defaults."""
@@ -871,6 +887,7 @@ class TestPydanticModels:
                 "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "transcription": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
                 "rerank": {"passed": False, "skipped": True, "latency_ms": 0.0},
             }
@@ -881,7 +898,7 @@ class TestPydanticModels:
         assert report.reasoning.skipped is True
         assert report.multimodal.skipped is True
         assert report.streaming.skipped is True
-
+        assert report.transcription.skipped is True
 
 
 class TestSaveJsonReport:
@@ -920,19 +937,58 @@ class TestSaveJsonReport:
 class TestBuildReport:
     def test_chat_model_strips_embedding_and_rerank(self):
         """Chat model report excludes embedding and rerank keys."""
-        with patch("main.MODEL_CONFIG", {"gpt": {"model_type": "chat", "extra_body": None}}):
+        with patch(
+            "main.MODEL_CONFIG", {"gpt": {"model_type": "chat", "extra_body": None}}
+        ):
             result = _build_report(
                 {
                     "models": {
                         "gpt": {
-                            "basic_completion": {"passed": True, "latency_ms": 10, "response": "hi"},
-                            "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "tool_calling_strict": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "reasoning": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "multimodal": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "streaming": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "embedding": {"passed": False, "skipped": True, "latency_ms": 0},
-                            "rerank": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "basic_completion": {
+                                "passed": True,
+                                "latency_ms": 10,
+                                "response": "hi",
+                            },
+                            "tool_calling": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "tool_calling_strict": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "reasoning": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "multimodal": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "streaming": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "transcription": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "embedding": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
+                            "rerank": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
                         }
                     }
                 }
@@ -945,7 +1001,10 @@ class TestBuildReport:
 
     def test_embedding_model_has_only_embedding(self):
         """Embedding model report contains only the embedding key."""
-        with patch("main.MODEL_CONFIG", {"bge-m3": {"model_type": "embedding", "extra_body": None}}):
+        with patch(
+            "main.MODEL_CONFIG",
+            {"bge-m3": {"model_type": "embedding", "extra_body": None}},
+        ):
             result = _build_report(
                 {
                     "models": {
@@ -957,7 +1016,11 @@ class TestBuildReport:
                                 "embedding_norm": 1.0,
                                 "embedding_sample": [0.1, 0.2],
                             },
-                            "basic_completion": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "basic_completion": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
                         }
                     }
                 }
@@ -967,7 +1030,10 @@ class TestBuildReport:
 
     def test_rerank_model_has_only_rerank(self):
         """Rerank model report contains only the rerank key."""
-        with patch("main.MODEL_CONFIG", {"bge-reranker": {"model_type": "rerank", "extra_body": None}}):
+        with patch(
+            "main.MODEL_CONFIG",
+            {"bge-reranker": {"model_type": "rerank", "extra_body": None}},
+        ):
             result = _build_report(
                 {
                     "models": {
@@ -979,7 +1045,11 @@ class TestBuildReport:
                                 "top_score": 0.9,
                                 "top_index": 0,
                             },
-                            "basic_completion": {"passed": False, "skipped": True, "latency_ms": 0},
+                            "basic_completion": {
+                                "passed": False,
+                                "skipped": True,
+                                "latency_ms": 0,
+                            },
                         }
                     }
                 }
@@ -1457,3 +1527,240 @@ class TestRerankPydantic:
 
 
 # --- run_model_tests rerank routing ---
+
+
+class TestRunModelTestsRerankRouting:
+    def test_rerank_model_only_runs_rerank(self):
+        """Models with type=rerank only run the rerank test."""
+        with patch(
+            "main.run_rerank_test",
+            return_value={
+                "passed": True,
+                "results": [{"index": 0, "relevance_score": 0.95}],
+                "top_score": 0.95,
+                "top_index": 0,
+            },
+        ) as mock_rerank:
+            with patch.dict(
+                "main.MODEL_CONFIG",
+                {"test-rerank": {"model_type": "rerank"}},
+            ):
+                result = run_model_tests("test-rerank")
+
+        assert "rerank" in result
+        assert result["rerank"]["passed"] is True
+        assert len(result) == 1
+        mock_rerank.assert_called_once()
+
+
+# --- run_transcription_test ---
+
+
+class TestTranscription:
+    def test_transcription_returns_response(self):
+        """Transcription test returns the model's transcription text."""
+        mock_response = MagicMock()
+        mock_response.text = "Bonjour, comment allez-vous ?"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.transcriptions.create.return_value = (
+                mock_response
+            )
+            result = run_transcription_test("whisper-medium")
+
+        assert result["response"] == "Bonjour, comment allez-vous ?"
+
+    def test_transcription_raises_error_on_no_text(self):
+        """Raises ValueError when transcription returns no text."""
+        mock_response = MagicMock()
+        mock_response.text = ""
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.transcriptions.create.return_value = (
+                mock_response
+            )
+            with pytest.raises(ValueError, match="no text"):
+                run_transcription_test("whisper-medium")
+
+    def test_transcription_creates_correct_api_call(self):
+        """Transcription test uses client.audio.transcriptions.create with the file."""
+        mock_response = MagicMock()
+        mock_response.text = "transcribed text"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.transcriptions.create.return_value = (
+                mock_response
+            )
+            run_transcription_test("whisper-medium")
+
+        MockOpenAI.return_value.audio.transcriptions.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.audio.transcriptions.create.call_args[1]
+        assert call_kwargs["model"] == "whisper-medium"
+
+    def test_transcription_passes_extra_body(self):
+        """extra_body is passed via kwargs."""
+        mock_response = MagicMock()
+        mock_response.text = "transcribed"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.transcriptions.create.return_value = (
+                mock_response
+            )
+            run_transcription_test(
+                "whisper-medium",
+                extra_body={"language": "fr", "response_format": "json"},
+            )
+
+        MockOpenAI.return_value.audio.transcriptions.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.audio.transcriptions.create.call_args[1]
+        assert call_kwargs["extra_body"]["language"] == "fr"
+        assert call_kwargs["extra_body"]["response_format"] == "json"
+
+
+# --- Pydantic models for transcription ---
+
+
+class TestTranscriptionPydantic:
+    def test_transcription_result_validation(self):
+        """TranscriptionResult validates correctly."""
+        result = TranscriptionResult.model_validate(
+            {
+                "passed": True,
+                "latency_ms": 100.0,
+                "response": "Hello world",
+            }
+        )
+        assert result.passed is True
+        assert result.response == "Hello world"
+        assert result.latency_ms == 100.0
+
+    def test_llm_report_with_transcription(self):
+        """LLMReport validates with transcription field."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 50.0,
+                    "response": "hi",
+                },
+                "tool_calling": {
+                    "passed": True,
+                    "latency_ms": 60.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "tool_calling_strict": {
+                    "passed": True,
+                    "latency_ms": 70.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "reasoning": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "multimodal": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "streaming": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "transcription": {
+                    "passed": True,
+                    "latency_ms": 80.0,
+                    "response": "transcription output",
+                },
+                "embedding": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "rerank": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+            }
+        )
+        assert report.transcription.passed is True
+        assert report.transcription.response == "transcription output"
+
+    def test_transcription_skipped_result(self):
+        """Skipped transcription has correct defaults."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 10.0,
+                    "response": "test",
+                },
+                "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "tool_calling_strict": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "transcription": {"passed": False, "skipped": True, "latency_ms": 0.0},
+            }
+        )
+        assert report.transcription.skipped is True
+        assert report.transcription.passed is False
+
+
+# --- run_model_tests transcription routing ---
+
+
+class TestRunModelTestsTranscription:
+    def test_transcription_model_only_runs_transcription(self):
+        """Models with type=transcription only run the transcription test."""
+        with patch(
+            "main.run_transcription_test",
+            return_value={
+                "passed": True,
+                "response": "transcription text",
+            },
+        ) as mock_transcribe:
+            with patch.dict(
+                "main.MODEL_CONFIG",
+                {"whisper-medium": {"model_type": "transcription"}},
+            ):
+                result = run_model_tests("whisper-medium")
+
+        assert "transcription" in result
+        assert result["transcription"]["passed"] is True
+        assert len(result) == 1
+        mock_transcribe.assert_called_once()
+
+
+# --- print_report: transcription ---
+
+
+class TestPrintReportTranscription:
+    def test_report_shows_transcription(self, capsys):
+        """Report shows response for transcription tests."""
+        all_results = {
+            "models": {
+                "model-a": {
+                    "transcription": {
+                        "passed": True,
+                        "latency_ms": 100,
+                        "response": "Bonjour, comment allez-vous ?",
+                    },
+                },
+            }
+        }
+
+        print_report(all_results)
+        captured = capsys.readouterr()
+
+        assert "PASS" in captured.out
+        assert "transcription" in captured.out
+        assert "Bonjour" in captured.out

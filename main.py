@@ -52,6 +52,10 @@ class StreamingResult(TestResult):
     response: str = ""
 
 
+class TranscriptionResult(TestResult):
+    response: str = ""
+
+
 class EmbeddingResult(TestResult):
     embedding_dim: int = 0
     embedding_norm: float = 0.0
@@ -86,6 +90,7 @@ class LLMReport(BaseModel):
     reasoning: ReasoningResult = Field(default_factory=ReasoningResult)
     multimodal: MultimodalResult = Field(default_factory=MultimodalResult)
     streaming: StreamingResult = Field(default_factory=StreamingResult)
+    transcription: TranscriptionResult = Field(default_factory=TranscriptionResult)
     embedding: EmbeddingResult = Field(default_factory=EmbeddingResult)
     rerank: RerankResult = Field(default_factory=RerankResult)
 
@@ -135,6 +140,11 @@ for _entry in MODEL_LIST:
                 "streaming": "streaming" in _caps,
                 "extra_body": _entry.get("extra_body"),
             }
+        elif _model_type == "transcription":
+            MODEL_CONFIG[_name] = {
+                "model_type": "transcription",
+                "extra_body": _entry.get("extra_body"),
+            }
         else:
             MODEL_CONFIG[_name] = {
                 "model_type": _model_type,
@@ -161,6 +171,15 @@ _IMAGE_PATH = _DATA_DIR / "multimodal_test.png"
 _IMAGE_BASE64: str = ""
 if _IMAGE_PATH.exists():
     _IMAGE_BASE64 = base64.b64encode(_IMAGE_PATH.read_bytes()).decode("utf-8")
+
+# ---------------------------------------------------------------------------
+# Transcription test audio
+# ---------------------------------------------------------------------------
+
+_AUDIO_PATH = _DATA_DIR / "bonjour.mp3"
+_AUDIO_BASE64: str = ""
+if _AUDIO_PATH.exists():
+    _AUDIO_BASE64 = base64.b64encode(_AUDIO_PATH.read_bytes()).decode("utf-8")
 
 # ---------------------------------------------------------------------------
 # Tool definition
@@ -444,6 +463,30 @@ def run_streaming_test(model: str, extra_body: dict | None = None) -> dict[str, 
     return {"response": full_response}
 
 
+def run_transcription_test(
+    model: str, extra_body: dict | None = None
+) -> dict[str, Any]:
+    if not _AUDIO_BASE64:
+        raise ValueError(
+            "No test audio found — place data/bonjour.mp3 next to the script"
+        )
+    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    import io
+
+    response = client.audio.transcriptions.create(
+        model=model,
+        file=io.BytesIO(base64.b64decode(_AUDIO_BASE64)),
+        **kwargs,
+    )
+    response_text = response.text if hasattr(response, "text") else ""
+    if not response_text:
+        raise ValueError("Transcription returned no text")
+    return {"response": response_text}
+
+
 def run_embedding_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
     client = OpenAI(
         base_url=BASE_URL,
@@ -540,6 +583,16 @@ def run_model_tests(model: str) -> dict[str, Any]:
                 model,
                 "rerank",
                 run_rerank_test,
+                extra_body=_extra_body,
+            )
+        }
+
+    if _model_type == "transcription":
+        return {
+            "transcription": run_test(
+                model,
+                "transcription",
+                run_transcription_test,
                 extra_body=_extra_body,
             )
         }
@@ -704,6 +757,7 @@ _RESULT_TYPES: dict[str, type[BaseModel]] = {
     "reasoning": ReasoningResult,
     "multimodal": MultimodalResult,
     "streaming": StreamingResult,
+    "transcription": TranscriptionResult,
     "embedding": EmbeddingResult,
     "rerank": RerankResult,
 }
@@ -715,7 +769,9 @@ def _model_type_keys(model_type: str) -> set[str]:
         return {"embedding"}
     if model_type == "rerank":
         return {"rerank"}
-    return set(_RESULT_TYPES) - {"embedding", "rerank"}
+    if model_type == "transcription":
+        return {"transcription"}
+    return set(_RESULT_TYPES) - {"embedding", "rerank", "transcription"}
 
 
 def _build_report(all_results: dict[str, Any]) -> dict[str, Any]:

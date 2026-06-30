@@ -43,3 +43,7 @@ models:
       - streaming
     extra_body:
       reasoning_effort: high
+  - name: qwen-asr
+    type: transcription
+  - name: whisper
+    type: transcription
