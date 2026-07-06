@@ -18,6 +18,7 @@ from main import (
     run_reasoning_test,
     run_streaming_test,
     run_transcription_test,
+    run_speech_test,
     run_embedding_test,
     run_rerank_test,
     run_model_tests,
@@ -29,6 +30,7 @@ from main import (
     EmbeddingResult,
     RerankResult,
     TranscriptionResult,
+    SpeechResult,
 )
 
 
@@ -1764,3 +1766,229 @@ class TestPrintReportTranscription:
         assert "PASS" in captured.out
         assert "transcription" in captured.out
         assert "Bonjour" in captured.out
+
+
+# --- run_speech_test ---
+
+
+class TestSpeech:
+    def test_speech_returns_response(self):
+        """Speech test returns a success response."""
+        mock_response = MagicMock()
+        mock_response.content = b"audio-data"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.speech.create.return_value = mock_response
+            result = run_speech_test("piper-fr")
+
+        assert result["response"] == "Speech synthesis successful"
+
+    def test_speech_raises_error_on_no_content(self):
+        """Raises ValueError when speech returns no content."""
+        mock_response = MagicMock()
+        mock_response.content = None
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.speech.create.return_value = mock_response
+            with pytest.raises(ValueError, match="no content"):
+                run_speech_test("piper-fr")
+
+    def test_speech_creates_correct_api_call(self):
+        """Speech test uses client.audio.speech.create with the correct model and input."""
+        mock_response = MagicMock()
+        mock_response.content = b"audio-data"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.speech.create.return_value = mock_response
+            run_speech_test("piper-fr")
+
+        MockOpenAI.return_value.audio.speech.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.audio.speech.create.call_args[1]
+        assert call_kwargs["model"] == "piper-fr"
+        assert call_kwargs["input"] == "Bonjour, ceci est un test de synthèse vocale."
+
+    def test_speech_passes_voice(self):
+        """voice from extra_body is passed as keyword argument."""
+        mock_response = MagicMock()
+        mock_response.content = b"audio-data"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.speech.create.return_value = mock_response
+            run_speech_test(
+                "piper-fr",
+                extra_body={"voice": "default"},
+            )
+
+        MockOpenAI.return_value.audio.speech.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.audio.speech.create.call_args[1]
+        assert call_kwargs["voice"] == "default"
+
+    def test_speech_passes_voice_empty_by_default(self):
+        """When no voice in extra_body, voice defaults to empty string."""
+        mock_response = MagicMock()
+        mock_response.content = b"audio-data"
+
+        with patch("main.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.audio.speech.create.return_value = mock_response
+            run_speech_test("piper-fr")
+
+        MockOpenAI.return_value.audio.speech.create.assert_called_once()
+        call_kwargs = MockOpenAI.return_value.audio.speech.create.call_args[1]
+        assert call_kwargs["voice"] == ""
+
+
+# --- Pydantic models for speech ---
+
+
+class TestSpeechPydantic:
+    def test_speech_result_validation(self):
+        """SpeechResult validates correctly."""
+        result = SpeechResult.model_validate(
+            {
+                "passed": True,
+                "latency_ms": 100.0,
+                "response": "Speech synthesis successful",
+            }
+        )
+        assert result.passed is True
+        assert result.response == "Speech synthesis successful"
+        assert result.latency_ms == 100.0
+
+    def test_llm_report_with_speech(self):
+        """LLMReport validates with speech field."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 50.0,
+                    "response": "hi",
+                },
+                "tool_calling": {
+                    "passed": True,
+                    "latency_ms": 60.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "tool_calling_strict": {
+                    "passed": True,
+                    "latency_ms": 70.0,
+                    "tool_calls": True,
+                    "tool_names": ["tool1"],
+                },
+                "reasoning": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "multimodal": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "streaming": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "transcription": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "speech": {
+                    "passed": True,
+                    "latency_ms": 80.0,
+                    "response": "Speech synthesis successful",
+                },
+                "embedding": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "rerank": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+            }
+        )
+        assert report.speech.passed is True
+        assert report.speech.response == "Speech synthesis successful"
+
+    def test_speech_skipped_result(self):
+        """Skipped speech has correct defaults."""
+        report = LLMReport.model_validate(
+            {
+                "basic_completion": {
+                    "passed": True,
+                    "latency_ms": 10.0,
+                    "response": "test",
+                },
+                "tool_calling": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "tool_calling_strict": {
+                    "passed": False,
+                    "skipped": True,
+                    "latency_ms": 0.0,
+                },
+                "reasoning": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "multimodal": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "streaming": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "transcription": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "speech": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "embedding": {"passed": False, "skipped": True, "latency_ms": 0.0},
+                "rerank": {"passed": False, "skipped": True, "latency_ms": 0.0},
+            }
+        )
+        assert report.speech.skipped is True
+        assert report.speech.passed is False
+
+
+# --- run_model_tests speech routing ---
+
+
+class TestRunModelTestsSpeech:
+    def test_speech_model_only_runs_speech(self):
+        """Models with type=speech only run the speech test."""
+        with patch(
+            "main.run_speech_test",
+            return_value={
+                "passed": True,
+                "response": "Speech synthesis successful",
+            },
+        ) as mock_speech:
+            with patch.dict(
+                "main.MODEL_CONFIG",
+                {"piper-fr": {"model_type": "speech"}},
+            ):
+                result = run_model_tests("piper-fr")
+
+        assert "speech" in result
+        assert result["speech"]["passed"] is True
+        assert len(result) == 1
+        mock_speech.assert_called_once()
+
+
+# --- print_report: speech ---
+
+
+class TestPrintReportSpeech:
+    def test_report_shows_speech(self, capsys):
+        """Report shows response for speech tests."""
+        all_results = {
+            "models": {
+                "model-a": {
+                    "speech": {
+                        "passed": True,
+                        "latency_ms": 100,
+                        "response": "Speech synthesis successful",
+                    },
+                },
+            }
+        }
+
+        print_report(all_results)
+        captured = capsys.readouterr()
+
+        assert "PASS" in captured.out
+        assert "speech" in captured.out
+        assert "Speech synthesis successful" in captured.out

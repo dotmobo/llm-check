@@ -56,6 +56,10 @@ class TranscriptionResult(TestResult):
     response: str = ""
 
 
+class SpeechResult(TestResult):
+    response: str = ""
+
+
 class EmbeddingResult(TestResult):
     embedding_dim: int = 0
     embedding_norm: float = 0.0
@@ -91,6 +95,7 @@ class LLMReport(BaseModel):
     multimodal: MultimodalResult = Field(default_factory=MultimodalResult)
     streaming: StreamingResult = Field(default_factory=StreamingResult)
     transcription: TranscriptionResult = Field(default_factory=TranscriptionResult)
+    speech: SpeechResult = Field(default_factory=SpeechResult)
     embedding: EmbeddingResult = Field(default_factory=EmbeddingResult)
     rerank: RerankResult = Field(default_factory=RerankResult)
 
@@ -143,6 +148,11 @@ for _entry in MODEL_LIST:
         elif _model_type == "transcription":
             MODEL_CONFIG[_name] = {
                 "model_type": "transcription",
+                "extra_body": _entry.get("extra_body"),
+            }
+        elif _model_type == "speech":
+            MODEL_CONFIG[_name] = {
+                "model_type": "speech",
                 "extra_body": _entry.get("extra_body"),
             }
         else:
@@ -487,6 +497,23 @@ def run_transcription_test(
     return {"response": response_text}
 
 
+def run_speech_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
+    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    kwargs: dict[str, Any] = {}
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    voice = (extra_body or {}).get("voice", "")
+    response = client.audio.speech.create(
+        model=model,
+        input="Bonjour, ceci est un test de synthèse vocale.",
+        voice=voice,
+        **kwargs,
+    )
+    if not response.content:
+        raise ValueError("Speech synthesis returned no content")
+    return {"response": "Speech synthesis successful"}
+
+
 def run_embedding_test(model: str, extra_body: dict | None = None) -> dict[str, Any]:
     client = OpenAI(
         base_url=BASE_URL,
@@ -593,6 +620,16 @@ def run_model_tests(model: str) -> dict[str, Any]:
                 model,
                 "transcription",
                 run_transcription_test,
+                extra_body=_extra_body,
+            )
+        }
+
+    if _model_type == "speech":
+        return {
+            "speech": run_test(
+                model,
+                "speech",
+                run_speech_test,
                 extra_body=_extra_body,
             )
         }
@@ -758,6 +795,7 @@ _RESULT_TYPES: dict[str, type[BaseModel]] = {
     "multimodal": MultimodalResult,
     "streaming": StreamingResult,
     "transcription": TranscriptionResult,
+    "speech": SpeechResult,
     "embedding": EmbeddingResult,
     "rerank": RerankResult,
 }
@@ -771,7 +809,9 @@ def _model_type_keys(model_type: str) -> set[str]:
         return {"rerank"}
     if model_type == "transcription":
         return {"transcription"}
-    return set(_RESULT_TYPES) - {"embedding", "rerank", "transcription"}
+    if model_type == "speech":
+        return {"speech"}
+    return set(_RESULT_TYPES) - {"embedding", "rerank", "transcription", "speech"}
 
 
 def _build_report(all_results: dict[str, Any]) -> dict[str, Any]:

@@ -47,3 +47,7 @@ models:
     type: transcription
   - name: whisper
     type: transcription
+  - name: piper-fr
+    type: speech
+    extra_body:
+      voice: ""

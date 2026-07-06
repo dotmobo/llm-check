@@ -1,6 +1,6 @@
 # llm-check
 
-A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming, embedding, rerank) for monitoring.
+A Python script to verify LLM inference server capabilities (basic completion, tool calling, reasoning, multimodal, streaming, embedding, rerank, speech) for monitoring.
 
 ## Features
 
@@ -12,6 +12,7 @@ A Python script to verify LLM inference server capabilities (basic completion, t
 - Tests embedding (vectorization)
 - Tests rerank (document re-ranking)
 - Tests transcription (speech-to-text)
+- Tests speech synthesis (text-to-speech)
 - Skips tests based on model capabilities defined in config
 - Human-readable colored console report
 - JSON report output for monitoring tools
@@ -69,6 +70,10 @@ models:
     type: transcription
   - name: qwen-asr
     type: transcription
+  - name: piper-fr
+    type: speech
+    extra_body:
+      voice: ""
 ```
 
 Each model entry supports a `type` field to specify the model category:
@@ -77,6 +82,7 @@ Each model entry supports a `type` field to specify the model category:
 - `embedding` — model is tested for embedding/vectorization capabilities
 - `rerank` — model is tested for document re-ranking capabilities
 - `transcription` — model is tested for speech-to-text capabilities
+- `speech` — model is tested for text-to-speech (synthesis) capabilities
 
 If `type` is omitted, the model defaults to `chat` behavior.
 
@@ -93,7 +99,10 @@ Some models require `extra_body` for reasoning tests:
 - `chat_template_kwargs` — e.g. `enable_thinking: true` (qwen, gemma)
 - `reasoning_effort` — e.g. `high` (mistral-small-4)
 
-Add it under the model entry as shown above.
+Speech models use `extra_body` to specify the voice:
+- `voice` — e.g. `""` (default), `"default"`, etc.
+
+Add them under the model entry as shown above.
 
 ## Usage
 
